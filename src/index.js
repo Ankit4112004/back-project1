@@ -1,11 +1,21 @@
 import dotenv from "dotenv";
 
 import connectDB from "./db/index.js";
+import { log } from "console";
 
 dotenv.config();
 
-connectDB();
-console.log('PORT:', process.env.PORT);
+connectDB()
+.then(()=>{
+    app.listen(process.env.PORT || 8000, ()=>{
+        console.log(`server is running on ${process.env.PORT}`);
+    })
+})
+.catch((err)=>{
+    console.log("MOGO db connection failed", err);
+})
+
+// console.log('PORT:', process.env.PORT);
 
 
 
