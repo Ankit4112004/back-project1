@@ -51,7 +51,7 @@ userSchema.pre("save", async function(next){
     if(!this.isModified("password")) return next();
 
     //if we dont write this if condition then for any change whether it is in password username or avatar or else it will refersh it so we write this if condition so it will only refresh when password is modified
-    this.password = bcrypt.hash(this.password,10)
+    this.password =await bcrypt.hash(this.password,10)
     next()
 })
 
