@@ -4,11 +4,28 @@ import { User } from '../models/user.model.js';
 import { uploadonCloudinary } from '../utils/cloudinary.js';
 import { ApiResponse } from '../utils/apirespnse.js';
 
+const generateAccessAndRefreshTokens = async(userId)=>{
+    try{
+        const user = await User.findById(userId);
+        const accessToken = user.generateAccessToken()
+        const refreshToken = user.generateRefreshToken()
+
+        user.refreshToken = refreshToken
+        await user.save({validateBeforeSave: false})
+
+        return {accessToken, refreshToken}
+
+    }catch(error){
+        throw new ApiError(500,error)
+    }
+}
+
+
 // for testing
 // => http://localhost:8000/api/v1/users/register
 const registerUser =asyncHandler(async(req, res)=>{
     console.log("FILES RECEIVED:", req.files);
-console.log("BODY RECEIVED:", req.body);
+    console.log("BODY RECEIVED:", req.body);
 
     //get user details from frontend
     //validation - not empty
@@ -21,7 +38,7 @@ console.log("BODY RECEIVED:", req.body);
     //return res
 
     const{fullname, email, username, password} = req.body;
-    console.log("email", email);
+    console.log("email : ", email);
     //checking all fields are non empty
     if(
         [fullname, email, username, password].some( field=>field?.trim()==="")
@@ -70,9 +87,9 @@ console.log("req.body", req.body);
         fullname,
         avatar: avatar.url,
         coverImage: coverImage?.url || "",
-        email,
+        email: email.toLowerCase().trim(),
         password,
-        username: username.toLowerCase()
+        username: username.toLowerCase().trim()
     })
 
     //if the user is created then a new field ._id will be created and automatically attached to user and moreover now we want the user didnt contains password and refreshtoken info fow which we have a syntax .select("-field1 -field2") write field which u dont wan to add with a minus sign
@@ -91,4 +108,95 @@ console.log("req.body", req.body);
     //go to form data
 })
 
-export {registerUser}
+const  loginUser = asyncHandler(async(req,res)=>{
+    //req->body -> data
+    //username or email
+    //find the user
+    //password check
+    //access and refresh token
+    //send cookies
+    //to see thw users in db =>
+const allUsers = await User.find({});
+console.log("All users in DB:");
+console.log(allUsers.map(u => u.email));
+// <=
+    console.log("Login Email:", req.body.email);
+    console.log("Login password:", req.body.password);
+    const { username, password} = req.body
+    const email = req.body.email?.toLowerCase().trim();
+    if(!username && !email) {
+        throw new ApiError(400, "username or email is required");
+    }
+    //user ->our created user
+    //User ->mongoose wala imported user
+    const user = await User.findOne({
+        $or:[{username},{email}]
+    })
+
+
+
+    if(!user){
+        throw new ApiError(404,"User does  not exist");
+    }
+
+    const isPasswordValid = user.isPasswordCorrect(password);
+    
+    if(!isPasswordValid){
+        throw new ApiError(401,"Invalid User credentials")
+    }
+
+    const {accessToken, refreshToken} = await generateAccessAndRefreshTokens(user._id)
+
+    const loggedInUser = await User.findById(user._id).select("-password -refreshToken")
+    //before sending cookies we need to design some options for them options is in object form
+    const options = {
+        httpOnly : true,
+        secure : true
+    }
+
+    return res
+    .status(200)
+    .cookie("accessToken",accessToken,options)
+    .cookie("refreshToken",refreshToken,options)
+    .json(
+        new ApiResponse(
+            200,
+            {
+                user: loggedInUser, accessToken,
+                refreshToken
+            },
+            "User loggedin successfully"
+        )
+    )
+})
+
+const logoutUser = asyncHandler(async(req,res)=>{
+     await User.findByIdAndUpdate(
+        req.user._id,
+        {
+            $set: {
+                refreshToken: undefined
+            }
+        },{
+            //for refresh
+            new : true
+        }
+     )
+     
+     const options = {
+         httpsOnly : true,
+         secure: true
+        }
+        
+        return res.status(200)
+        .clearCookie("accessToken",options)
+        .clearCookie("refreshToken", options)
+        .json(new ApiResponse(200, {},"User logged Out"));
+})
+
+
+export {
+    registerUser,
+    loginUser,
+    logoutUser
+}
