@@ -4,6 +4,8 @@ import { User } from '../models/user.model.js';
 import { uploadonCloudinary } from '../utils/cloudinary.js';
 import { ApiResponse } from '../utils/apirespnse.js';
 import jwt  from 'jsonwebtoken';
+import mongoose from 'mongoose';
+import { Subscription } from '../models/subscription.model.js';
 
 const generateAccessAndRefreshTokens = async(userId)=>{
     try{
@@ -175,8 +177,8 @@ const logoutUser = asyncHandler(async(req,res)=>{
      await User.findByIdAndUpdate(
         req.user._id,
         {
-            $set: {
-                refreshToken: undefined
+            $unset: {
+                refreshToken: 1 //this removes the field from the document
             }
         },{
             //for refresh
@@ -258,7 +260,7 @@ const changeCurrentPassword = asyncHandler(async(req, res)=>{
 
 const getCurrentUser = asyncHandler(async(req,res)=>{
     return res.status(200)
-    .json(200, req.user,"current user fetched successfully")
+    .json(new ApiResponse(200, req.user,"current user fetched successfully"))
 })
 
 const updateAccountDetails = asyncHandler(async(req,res)=>{
@@ -268,7 +270,7 @@ const updateAccountDetails = asyncHandler(async(req,res)=>{
         throw new ApiError(400,"All fields are required")
     }
 
-    const user = User.findByIdAndUpdate(
+    const user =await User.findByIdAndUpdate(
         req.user?._id,
         {
             $set:{
@@ -309,7 +311,7 @@ const updateUserAvatar = asyncHandler(async(req, res)=>{
 
     return res.status(200)
     .json(
-        new ApiResponse("avatar updated successfully")
+        new ApiResponse(200, user, "avatar updated successfully")
     )
 })
 
@@ -331,7 +333,7 @@ const updateUserCoverImage = asyncHandler(async(req, res)=>{
         req.user?._id,
         {
             $set:{
-                avatar: avatar.url
+                coverImage: coverImage.url
             }
         },
         {new : true}
@@ -339,7 +341,126 @@ const updateUserCoverImage = asyncHandler(async(req, res)=>{
 
     return res.status(200)
     .json(
-        new ApiResponse("cover image updated successfully")
+        new ApiResponse(200, user,"cover image updated successfully")
+    )
+})
+
+const getUserChannnelProfile = asyncHandler(async(req,res)=>{
+    const {username} = req.params;
+    if(!username?.trim()){
+        throw new ApiError(400, "Username is missing")
+    } 
+
+    // User.find({username})
+    //this can be use to find user with this username but this consume lots of time, so we will use aggreate pipelines
+
+    const channel = await User.aggregate([
+        {
+            $match:{
+                username: username?.toLowerCase(),
+            }
+        },
+        {
+           $lookup:{
+            // from:"Subscription"
+            //this is wrong becz in model the name becom plural and lowercase
+            // so Subscription will become subscriptions
+            from:"subscriptions",
+            localField:"_id",
+            foreignField:"channel",
+            as:"subscribers"
+           } 
+        },
+        {
+            $lookup:{
+                from:"subscriptions",
+                localField:"_id",
+                foreignField:"subscriber",
+                as:"subscribedTo"
+            }
+        },{
+            $addFields:{
+                subscribersCount:{
+                    $size: "subscribers"
+                },
+                channelIsSubscribedToCount:{
+                    $size: "subscribedTo"
+                },
+                isSubscribed:{
+                    $cond:{
+                        if:{$in : [req.user?._id,"subscribers.subscriber"]},
+                        then: true,
+                        else: false
+                    }
+                }
+            }
+        },{
+        $project:{
+            fullname:1,
+            username:true,
+            subscribersCount:1,
+            channelIsSubscribedToCount: 1,
+            isSubscribed: 1,
+            avatar: 1,
+            coverImage: 1,
+            email: 1
+        }
+        }
+    ])
+
+    if(!channel?.length){
+        throw new ApiError(404, "channel does not exists")
+    }
+
+    return res.status(200).json(new ApiResponse(200,channel[0],"Iser channel fetched successfully"))
+})
+
+const getWatchHistory = asyncHandler(async(req,res)=>{
+    const user = await User.aggregate([
+        {
+            $match:{
+                // _id: req.user._id this is incorrect
+                _id: new mongoose.Types.ObjectId(req,user._id)
+            }
+        },
+        {
+            $lookup:{
+                from:"Videos",
+                localField:"watchHistory",
+                foreignField:"_id",
+                as:"watchHistory",
+                pipeline:[
+                    {
+                    $lookup:{
+                        from : "users",
+                        localField:"owner",
+                        foreignField:"_id",
+                        as:"owner",
+                        pipeline:[
+                            {
+                            $project:{
+                                fullname:1,
+  username: 1,
+  avatar: 1                              
+                            }
+                            }
+                        ]    
+                        }
+                    },
+                    {
+                        $addFields:{
+                            owner:{
+                              $first:"$owner"  
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    ])
+
+    return res.status(200).json(
+        new ApiResponse(200,user[0].watchHistory,"Watch History fetched successfully")
     )
 })
 
@@ -351,5 +472,7 @@ export {
     getCurrentUser,
     updateAccountDetails,
     updateUserAvatar,
-    updateUserCoverImage
+    updateUserCoverImage,
+    getUserChannnelProfile,
+    getWatchHistory
 }
